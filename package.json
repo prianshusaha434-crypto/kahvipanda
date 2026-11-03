@@ -1,0 +1,36 @@
+{
+  "name": "kahvi-panda-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "KAHVI PANDA — The Nordic Blend. Full-stack e-commerce platform.",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev --workspace=@kahvi-panda/api\" \"npm run dev --workspace=@kahvi-panda/web -- --host 0.0.0.0\"",
+    "dev:web": "npm run dev --workspace=@kahvi-panda/web -- --host 0.0.0.0",
+    "dev:api": "npm run dev --workspace=@kahvi-panda/api",
+    "build": "npm run build --workspace=@kahvi-panda/api && npm run build --workspace=@kahvi-panda/web && npm run build --workspace=@kahvi-panda/shared",
+    "test": "tsx --test tests/api.test.ts",
+    "db:generate": "prisma generate",
+    "db:push": "prisma db push",
+    "db:seed": "tsx prisma/seed.ts"
+  },
+  "keywords": [
+    "coffee",
+    "ecommerce",
+    "react",
+    "nodejs",
+    "express",
+    "prisma",
+    "kahvi-panda"
+  ],
+  "author": "Kahvi Panda Engineering",
+  "license": "ISC",
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "tsx": "^4.19.3",
+    "typescript": "^5.7.3"
+  }
+}

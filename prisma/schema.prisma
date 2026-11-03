@@ -1,0 +1,377 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id           String        @id @default(uuid())
+  email        String        @unique
+  passwordHash String
+  name         String
+  phone        String?
+  role         String        @default("CUSTOMER") // "CUSTOMER", "ADMIN", "STAFF"
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  orders       Order[]
+  addresses    Address[]
+  wishlists    Wishlist[]
+  sessions     Session[]
+  reviews      ProductReview[]
+  auditLogs    AdminAuditLog[]
+}
+
+model Session {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+}
+
+model Address {
+  id         String   @id @default(uuid())
+  userId     String?
+  user       User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fullName   String
+  phone      String
+  street     String
+  apartment  String?
+  city       String
+  state      String
+  postalCode String
+  country    String   @default("India")
+  isDefault  Boolean  @default(false)
+  createdAt  DateTime @default(now())
+}
+
+model Category {
+  id          String    @id @default(uuid())
+  name        String
+  slug        String    @unique
+  description String?
+  image       String?
+  sortOrder   Int       @default(0)
+  products    Product[]
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+model Product {
+  id                       String           @id @default(uuid())
+  name                     String
+  slug                     String           @unique
+  description              String
+  shortDescription         String
+  categoryId               String
+  category                 Category         @relation(fields: [categoryId], references: [id])
+  coffeeType               String           // "Whole Beans", "Ground Coffee", "Instant Coffee", "Coffee Bundles", "Brewing Accessories", "Innovations"
+  roastLevel               String           // "Light", "Medium", "Medium-Dark", "Dark", "Nordic Roast"
+  origin                   String           // e.g. "Chikmagalur", "Wayanad", "Coorg", "Kolkata Craft Lab"
+  tastingNotes             String           // Stored as JSON or comma-separated: "Dark Chocolate, Orange Blossom, Hazelnut"
+  compatibleBrewingMethods String           // JSON or comma-separated: "French Press, Moka Pot, Aeropress, Espresso"
+  ingredients              String?          // e.g. "100% Arabica Coffee Beans"
+  status                   String           @default("ACTIVE") // "ACTIVE", "ARCHIVED", "COMING_SOON"
+  featured                 Boolean          @default(false)
+  bestseller               Boolean          @default(false)
+  createdAt                DateTime         @default(now())
+  updatedAt                DateTime         @updatedAt
+
+  variants                 ProductVariant[]
+  images                   ProductImage[]
+  inventoryMovements       InventoryMovement[]
+  cartItems                CartItem[]
+  orderItems               OrderItem[]
+  reviews                  ProductReview[]
+  wishlists                Wishlist[]
+}
+
+model ProductVariant {
+  id             String      @id @default(uuid())
+  productId      String
+  product        Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
+  sku            String      @unique
+  weight         String      // e.g. "250g", "500g", "1kg", "10 Sachets"
+  grindType      String      // "Whole Beans", "French Press", "Moka Pot", "Filter Grind", "Espresso", "Cold Brew"
+  price          Float
+  compareAtPrice Float?
+  currency       String      @default("INR")
+  stockQuantity  Int         @default(50)
+  isAvailable    Boolean     @default(true)
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  orderItems     OrderItem[]
+  cartItems      CartItem[]
+  inventoryMovements InventoryMovement[]
+}
+
+model ProductImage {
+  id        String   @id @default(uuid())
+  productId String
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  url       String
+  altText   String?
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+}
+
+model InventoryMovement {
+  id         String          @id @default(uuid())
+  productId  String
+  product    Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  variantId  String
+  variant    ProductVariant  @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  quantity   Int             // positive for restock, negative for sale
+  reason     String          // "SALE", "RESTOCK", "DAMAGE", "ADJUSTMENT"
+  reference  String?         // e.g. orderId or supplier invoice
+  createdAt  DateTime        @default(now())
+}
+
+model Cart {
+  id        String     @id @default(uuid())
+  userId    String?    @unique
+  sessionId String     @unique
+  items     CartItem[]
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+}
+
+model CartItem {
+  id        String         @id @default(uuid())
+  cartId    String
+  cart      Cart           @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product        @relation(fields: [productId], references: [id], onDelete: Cascade)
+  variantId String
+  variant   ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  quantity  Int            @default(1)
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+}
+
+model Order {
+  id              String        @id @default(uuid())
+  orderNumber     String        @unique
+  userId          String?
+  user            User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+  customerName    String
+  customerEmail   String
+  customerPhone   String
+  shippingAddress String        // Serialized JSON
+  status          String        @default("PENDING") // PENDING, CONFIRMED, PROCESSING, DISPATCHED, DELIVERED, CANCELLED
+  subtotal        Float
+  taxAmount       Float         @default(0)
+  shippingAmount  Float         @default(0)
+  discountAmount  Float         @default(0)
+  totalAmount     Float
+  couponCode      String?
+  notes           String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  items           OrderItem[]
+  payments        Payment[]
+  shipments       Shipment[]
+}
+
+model OrderItem {
+  id             String         @id @default(uuid())
+  orderId        String
+  order          Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId      String
+  product        Product        @relation(fields: [productId], references: [id])
+  variantId      String
+  variant        ProductVariant @relation(fields: [variantId], references: [id])
+  name           String
+  weight         String
+  grindType      String
+  unitPrice      Float
+  quantity       Int
+  totalPrice     Float
+}
+
+model Payment {
+  id              String   @id @default(uuid())
+  orderId         String
+  order           Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  provider        String   @default("RAZORPAY") // RAZORPAY, CASH_ON_DELIVERY, TEST_MODE
+  status          String   @default("PENDING")  // PENDING, AUTHORIZED, CAPTURED, FAILED, REFUNDED
+  amount          Float
+  currency        String   @default("INR")
+  razorpayOrderId String?  @unique
+  razorpayPayId   String?  @unique
+  razorpaySig     String?
+  errorLog        String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model ShippingMethod {
+  id             String     @id @default(uuid())
+  name           String     // "Standard Delivery", "Kolkata Same-Day", "Express Air"
+  code           String     @unique
+  price          Float
+  estimatedDays  String
+  isActive       Boolean    @default(true)
+}
+
+model Shipment {
+  id             String    @id @default(uuid())
+  orderId        String
+  order          Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  trackingNumber String?
+  courier        String?   // "Blue Dart", "Delhivery", "DTDC"
+  status         String    @default("LABEL_CREATED") // LABEL_CREATED, IN_TRANSIT, OUT_FOR_DELIVERY, DELIVERED
+  dispatchedAt   DateTime?
+  deliveredAt    DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+}
+
+model Coupon {
+  id             String    @id @default(uuid())
+  code           String    @unique
+  discountType   String    // "PERCENTAGE", "FIXED"
+  discountValue  Float
+  minOrderValue  Float     @default(0)
+  maxDiscount    Float?
+  usageLimit     Int?
+  timesUsed      Int       @default(0)
+  expiresAt      DateTime?
+  isActive       Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+}
+
+model Wishlist {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, productId])
+}
+
+model Enquiry {
+  id                 String   @id @default(uuid())
+  referenceNumber    String   @unique
+  name               String
+  phone              String
+  email              String
+  type               String   @default("GENERAL") // GENERAL, PRODUCT, WHOLESALE_B2B, CORPORATE, SUPPORT, AI_ESCALATION
+  subject            String
+  message            String
+  businessName       String?
+  city               String?
+  estimatedMonthlyKg Float?
+  productsOfInterest String?
+  whatsAppStatus     String   @default("QUEUED") // QUEUED, SENT, FAILED, FALLBACK_CLICK
+  notes              String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  notifications      NotificationDelivery[]
+}
+
+model NotificationDelivery {
+  id           String    @id @default(uuid())
+  enquiryId    String
+  enquiry      Enquiry   @relation(fields: [enquiryId], references: [id], onDelete: Cascade)
+  channel      String    @default("WHATSAPP") // WHATSAPP, EMAIL, SMS
+  recipient    String
+  payload      String
+  status       String    @default("QUEUED") // QUEUED, DELIVERED, FAILED
+  providerRef  String?
+  errorMessage String?
+  createdAt    DateTime  @default(now())
+}
+
+model NewsletterSubscriber {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  source       String   @default("HOMEPAGE_FOOTER")
+  isActive     Boolean  @default(true)
+  subscribedAt DateTime @default(now())
+}
+
+model AIConversation {
+  id            String      @id @default(uuid())
+  sessionId     String      @unique
+  preferredLang String      @default("en")
+  messages      AIMessage[]
+  events        AIRecommendationEvent[]
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+}
+
+model AIMessage {
+  id             String         @id @default(uuid())
+  conversationId String
+  conversation   AIConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  role           String         // "user", "assistant", "system", "tool"
+  content        String
+  toolCalls      String?        // Serialized JSON
+  toolCallId     String?
+  createdAt      DateTime       @default(now())
+}
+
+model AIRecommendationEvent {
+  id             String         @id @default(uuid())
+  conversationId String
+  conversation   AIConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  productId      String
+  action         String         // "RECOMMENDED", "CLICKED", "ADDED_TO_CART", "CONVERTED"
+  metadata       String?        // Additional telemetry JSON
+  createdAt      DateTime       @default(now())
+}
+
+model ProductReview {
+  id        String   @id @default(uuid())
+  productId String
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  rating    Int      // 1 to 5
+  title     String?
+  comment   String
+  isVerified Boolean @default(true)
+  createdAt DateTime @default(now())
+}
+
+model ContentPage {
+  id        String   @id @default(uuid())
+  slug      String   @unique
+  title     String
+  body      String
+  updatedAt DateTime @updatedAt
+}
+
+model BlogPost {
+  id          String   @id @default(uuid())
+  slug        String   @unique
+  title       String
+  excerpt     String
+  content     String
+  coverImage  String
+  category    String   // "Brewing Guide", "Roast Profile", "Culture"
+  readTime    String   // "4 min read"
+  author      String   @default("Kahvi Panda Coffee Team")
+  publishedAt DateTime @default(now())
+}
+
+model AdminAuditLog {
+  id        String   @id @default(uuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action    String   // "UPDATE_PRODUCT", "CHANGE_ORDER_STATUS", "EXPORT_ENQUIRIES"
+  entity    String   // "Product", "Order", "Enquiry"
+  entityId  String?
+  details   String?  // JSON details
+  createdAt DateTime @default(now())
+}
