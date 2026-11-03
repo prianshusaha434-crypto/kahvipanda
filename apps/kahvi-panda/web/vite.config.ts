@@ -8,7 +8,7 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
-      '@kahvi-panda/shared': path.resolve(__dirname, '../../packages/shared/src'),
+      '@kahvi-panda/shared': path.resolve(__dirname, '../shared/src'),
     },
   },
   server: {

@@ -23,30 +23,24 @@ Kahvi Panda is a complete, production-grade full-stack e-commerce platform built
 ```
 kahvi-panda/
 ├── apps/
-│   ├── web/                          # React 18 + Vite + TypeScript + Tailwind CSS
-│   │   ├── src/
-│   │   │   ├── app/App.tsx           # Full route tree (Storefront, Account, Admin)
-│   │   │   ├── components/           # Header, Footer, ProductCard, SearchModal
-│   │   │   ├── features/
-│   │   │   │   ├── ai-assistant/     # Panda AI floating concierge widget
-│   │   │   │   ├── cart/             # Slide-over cart drawer & CartContext
-│   │   │   ├── pages/                # Storefront, Shop, ProductDetails, Quiz, Checkout...
-│   │   │   ├── services/api.ts       # Centralized API client
-│   │   │   └── styles/               # Nordic brand tokens & global CSS
-│   └── api/                          # Node.js + Express + TypeScript + Prisma
-│       ├── src/
-│       │   ├── config/               # Environment validation
-│       │   ├── modules/
-│       │   │   ├── ai/               # OpenAI tool calling + Autonomous concierge engine
-│       │   │   ├── auth/             # JWT & session authentication
-│       │   │   ├── cart/             # Verified cart calculations & coupons
-│       │   │   ├── enquiry/          # Shared contact/B2B service & WhatsApp dispatch
-│       │   │   ├── orders/           # Inventory-safe checkout & Razorpay HMAC verifier
-│       │   │   └── products/         # Full-text catalogue search & filtering
-│       │   ├── routes/index.ts       # All REST endpoints mounted at /api/v1
-│       │   └── server.ts             # Express server with Helmet, CORS, and rate-limiting
-├── packages/
-│   └── shared/                       # Shared Zod schemas, TypeScript types, and constants
+│   └── kahvi-panda/
+│       ├── web/                     # React 18 + Vite + TypeScript + Tailwind CSS
+│       │   ├── src/
+│       │   │   ├── app/App.tsx       # Full route tree (Storefront, Account, Admin)
+│       │   │   ├── components/       # Header, Footer, ProductCard, SearchModal
+│       │   │   ├── features/
+│       │   │   │   ├── ai-assistant/
+│       │   │   │   └── cart/
+│       │   │   ├── pages/
+│       │   │   ├── services/api.ts
+│       │   │   └── styles/
+│       ├── api/                     # Node.js + Express + TypeScript + Prisma
+│       │   ├── src/
+│       │   │   ├── config/
+│       │   │   ├── modules/
+│       │   │   ├── routes/index.ts
+│       │   │   └── server.ts
+│       └── shared/                  # Shared Zod schemas, TypeScript types, and constants
 ├── prisma/
 │   ├── schema.prisma                 # 25+ normalized relational models (Postgres / SQLite)
 │   └── seed.ts                       # Kolkata launch catalogue & default admin user

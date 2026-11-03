@@ -4,8 +4,7 @@
   "private": true,
   "description": "KAHVI PANDA — The Nordic Blend. Full-stack e-commerce platform.",
   "workspaces": [
-    "apps/*",
-    "packages/*"
+    "apps/kahvi-panda/*"
   ],
   "scripts": {
     "dev": "concurrently \"npm run dev --workspace=@kahvi-panda/api\" \"npm run dev --workspace=@kahvi-panda/web -- --host 0.0.0.0\"",
