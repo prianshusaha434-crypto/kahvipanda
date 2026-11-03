@@ -76,20 +76,36 @@ app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
   });
 });
 
-// Server bootstrap
-const server = app.listen(CONFIG.PORT, () => {
-  console.log(`🐼 Kahvi Panda API is purring at http://localhost:${CONFIG.PORT}${CONFIG.API_PREFIX}`);
-  console.log(`☕ Environment: ${CONFIG.NODE_ENV} | Target WhatsApp: ${CONFIG.WHATSAPP.OFFICIAL_DISPLAY}`);
-});
-
-// Graceful shutdown
-process.on('SIGTERM', async () => {
-  console.log('SIGTERM signal received: closing HTTP server and database pool...');
-  server.close(async () => {
-    await prisma.$disconnect();
-    console.log('HTTP server closed.');
-    process.exit(0);
+// Server bootstrap with safe port fallback in local development
+const startServer = (port: number) => {
+  const server = app.listen(port, () => {
+    console.log(`🐼 Kahvi Panda API is purring at http://localhost:${port}${CONFIG.API_PREFIX}`);
+    console.log(`☕ Environment: ${CONFIG.NODE_ENV} | Target WhatsApp: ${CONFIG.WHATSAPP.OFFICIAL_DISPLAY}`);
   });
-});
+
+  server.on('error', async (error: NodeJS.ErrnoException) => {
+    if (error.code === 'EADDRINUSE') {
+      const fallbackPort = port + 1;
+      console.warn(`Port ${port} is busy. Retrying on ${fallbackPort}.`);
+      startServer(fallbackPort);
+      return;
+    }
+
+    console.error('Failed to start Kahvi Panda API server.', error);
+    process.exit(1);
+  });
+
+  // Graceful shutdown
+  process.on('SIGTERM', async () => {
+    console.log('SIGTERM signal received: closing HTTP server and database pool...');
+    server.close(async () => {
+      await prisma.$disconnect();
+      console.log('HTTP server closed.');
+      process.exit(0);
+    });
+  });
+};
+
+startServer(Number(process.env.PORT || CONFIG.PORT));
 
 export default app;
