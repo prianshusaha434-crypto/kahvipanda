@@ -10,7 +10,7 @@ if (process.env.NODE_ENV === 'production') {
 }
 const preferredPort = Number(process.env.PORT || 3000);
 const rootDir = __dirname;
-const webDistPath = path.join(rootDir, 'apps', 'kahvi-panda', 'web', 'dist');
+const webDistPath = path.join(rootDir, 'public');
 const apiRouterPath = path.join(rootDir, 'apps', 'kahvi-panda', 'api', 'dist', 'routes', 'index.js');
 
 if (!fs.existsSync(webDistPath) || !fs.existsSync(apiRouterPath)) {
@@ -61,4 +61,8 @@ app.get(/^\/(?!api).*/, (_req, res) => {
   res.sendFile(path.join(webDistPath, 'index.html'));
 });
 
-startServer(preferredPort);
+if (!process.env.VERCEL) {
+  startServer(preferredPort);
+}
+
+module.exports = app;

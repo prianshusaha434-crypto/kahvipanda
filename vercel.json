@@ -1,0 +1,9 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "npm run build",
+  "functions": {
+    "server.js": {
+      "includeFiles": "{apps/kahvi-panda/api/dist/**,node_modules/.prisma/client/**,public/**}"
+    }
+  }
+}

@@ -115,15 +115,16 @@ Copy `.env.example` to `.env`:
 ```bash
 cp .env.example .env
 ```
+Set `DATABASE_URL` to your PostgreSQL connection string and `DIRECT_URL` to its direct (non-pooled) connection string. A local PostgreSQL instance or hosted database is required.
 
 ### Step 3: Initialize Database & Seed
 ```bash
-npx prisma generate
-npx prisma db push
+npm run db:generate
+npm run db:push
 $env:SEED_RESET="true"
-npx tsx prisma/seed.ts
+npm run db:seed
 ```
-For PowerShell, set `ADMIN_EMAIL` and `ADMIN_PASSWORD` before seeding if you need an admin account. The seed clears store data, so only run it against a new database or when deliberately resetting one.
+Run the seed only against a new database: it clears existing store data. Set `ADMIN_EMAIL` and `ADMIN_PASSWORD` before seeding if you need an admin account.
 
 ### Step 4: Start Development Servers
 Run backend API and frontend concurrently:
@@ -152,19 +153,23 @@ npm test
 
 ---
 
-## 7. Production Deployment Instructions
+## 7. Production Deployment on Vercel
 
-The repository is configured for SQLite. For a single-server deployment, attach a persistent disk and point `DATABASE_URL` to a database file on that disk. Do not use the ephemeral application filesystem for the live database. For PostgreSQL, first migrate the Prisma schema and regenerate the client; changing only `DATABASE_URL` is not sufficient.
+Deploy this repository as **one Vercel project rooted at the repository root**. The root Express app serves the API, and the production build places the storefront in Vercel's root `public/` directory. Do not import the nested `api` or `web` workspaces as separate Vercel projects.
 
-1. **Set environment variables**: Set `NODE_ENV=production`, `PORT` to the port supplied by the host, a strong random `JWT_SECRET` of at least 32 characters, and `DATABASE_URL` to the persistent database file. Set `RAZORPAY_KEY_ID` and `RAZORPAY_KEY_SECRET` to enable live payments. Never set `SEED_RESET=true` on a live database.
-2. **Build**:
+1. Import the GitHub repository and set **Root Directory** to `.`. Vercel should detect the root Express app. Use `npm ci` for install and `npm run build` for build.
+2. Create a PostgreSQL database (for example, Neon, Supabase, or Prisma Postgres). Add these Vercel environment variables for Production, Preview, and Development as needed:
+   - `DATABASE_URL`: pooled PostgreSQL connection string for the app.
+   - `DIRECT_URL`: direct PostgreSQL connection string for Prisma schema setup.
+   - `NODE_ENV=production`.
+   - `JWT_SECRET`: a random secret of at least 32 characters.
+   - Add any optional integration credentials listed above.
+3. Before deploying, initialize the empty database from a machine with both database URLs configured:
    ```bash
    npm ci
-   npm run build
    npm run db:push
    ```
-3. **Start**:
-   ```bash
-   npm start
-   ```
-   The root server serves both the API and the built storefront from the same origin; configure the host to run the build command above and use `npm start` as its start command.
+   To load the starter catalogue, set `SEED_RESET=true` and run `npm run db:seed` once against this empty database. Seeding clears existing data; do not run it against a database containing live orders.
+4. Deploy the root project. Vercel builds the API, generates Prisma Client, and publishes the storefront from `public/`.
+
+The existing SQLite database is not automatically copied into PostgreSQL. Export and migrate any data you need to keep before switching production traffic.
