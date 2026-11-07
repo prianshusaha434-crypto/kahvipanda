@@ -40,7 +40,13 @@ export class OrderService {
     const orderNumber = `KP-${Date.now().toString().slice(-6)}-${Math.floor(100 + Math.random() * 900)}`;
 
     // 2. Determine payment flow: Test Mode vs Live Razorpay
-    const isTestMode = CONFIG.RAZORPAY.TEST_MODE;
+    const hasKeyId = Boolean(CONFIG.RAZORPAY.KEY_ID);
+    const hasKeySecret = Boolean(CONFIG.RAZORPAY.KEY_SECRET);
+    if (hasKeyId !== hasKeySecret) {
+      throw new Error('Payment gateway credentials are incomplete. Please contact the store.');
+    }
+
+    const isTestMode = !hasKeyId;
     let razorpayOrderId: string | undefined = undefined;
 
     if (!isTestMode && CONFIG.RAZORPAY.KEY_ID && CONFIG.RAZORPAY.KEY_SECRET) {
@@ -63,12 +69,18 @@ export class OrderService {
           })
         });
 
-        if (rzpResponse.ok) {
-          const rzpData: any = await rzpResponse.json();
-          razorpayOrderId = rzpData.id;
+        if (!rzpResponse.ok) {
+          throw new Error(`Razorpay returned HTTP ${rzpResponse.status}.`);
         }
-      } catch (err) {
-        console.error('Razorpay order creation failed, falling back to safe local order:', err);
+
+        const rzpData = await rzpResponse.json() as { id?: string };
+        if (!rzpData.id) {
+          throw new Error('Razorpay did not return an order ID.');
+        }
+        razorpayOrderId = rzpData.id;
+      } catch (error) {
+        console.error('Razorpay order creation failed.', error);
+        throw new Error('Unable to start secure payment right now. Please try again.');
       }
     }
 
@@ -117,12 +129,20 @@ export class OrderService {
       // If test mode or instant confirmation, decrement inventory right away
       if (isTestMode) {
         for (const item of calculation.items) {
-          await tx.productVariant.update({
-            where: { id: item.variantId },
+          const stockUpdate = await tx.productVariant.updateMany({
+            where: {
+              id: item.variantId,
+              productId: item.productId,
+              isAvailable: true,
+              stockQuantity: { gte: item.quantity }
+            },
             data: {
               stockQuantity: { decrement: item.quantity }
             }
           });
+          if (stockUpdate.count !== 1) {
+            throw new Error(`Item "${item.name}" is no longer available in the requested quantity.`);
+          }
 
           await tx.inventoryMovement.create({
             data: {
@@ -164,44 +184,78 @@ export class OrderService {
       throw new Error('Razorpay secret not configured on server.');
     }
 
+    const payment = await prisma.payment.findFirst({
+      where: { orderId, razorpayOrderId },
+      include: { order: true }
+    });
+    if (!payment || payment.status !== 'PENDING' || payment.order.status !== 'PENDING') {
+      throw new Error('Payment does not match a pending order.');
+    }
+
     // Verify HMAC-SHA256 signature
     const generatedSignature = crypto
       .createHmac('sha256', CONFIG.RAZORPAY.KEY_SECRET)
       .update(`${razorpayOrderId}|${razorpayPaymentId}`)
       .digest('hex');
 
-    if (generatedSignature !== razorpaySignature) {
+    const signatureBuffer = Buffer.from(razorpaySignature, 'hex');
+    const generatedSignatureBuffer = Buffer.from(generatedSignature, 'hex');
+    if (
+      !/^[a-f\d]{64}$/i.test(razorpaySignature) ||
+      signatureBuffer.length !== generatedSignatureBuffer.length ||
+      !crypto.timingSafeEqual(generatedSignatureBuffer, signatureBuffer)
+    ) {
       throw new Error('Invalid Razorpay signature. Potential fraudulent transaction.');
     }
 
-    // Update order and decrement stock atomically
+    // Capture payment and decrement stock atomically; duplicate callbacks cannot sell twice.
     const order = await prisma.$transaction(async (tx) => {
-      const updatedOrder = await tx.order.update({
-        where: { id: orderId },
+      const paymentUpdate = await tx.payment.updateMany({
+        where: { id: payment.id, status: 'PENDING' },
         data: {
-          status: 'CONFIRMED',
-          payments: {
-            updateMany: {
-              where: { orderId },
-              data: {
-                status: 'CAPTURED',
-                razorpayPayId: razorpayPaymentId,
-                razorpaySig: razorpaySignature
-              }
-            }
-          }
-        },
-        include: { items: true }
+          status: 'CAPTURED',
+          razorpayPayId: razorpayPaymentId,
+          razorpaySig: razorpaySignature
+        }
       });
+      if (paymentUpdate.count !== 1) {
+        throw new Error('Payment has already been processed.');
+      }
 
-      for (const item of updatedOrder.items) {
-        await tx.productVariant.update({
-          where: { id: item.variantId },
+      const items = await tx.orderItem.findMany({ where: { orderId } });
+      for (const item of items) {
+        const stockUpdate = await tx.productVariant.updateMany({
+          where: {
+            id: item.variantId,
+            productId: item.productId,
+            isAvailable: true,
+            stockQuantity: { gte: item.quantity }
+          },
           data: { stockQuantity: { decrement: item.quantity } }
+        });
+        if (stockUpdate.count !== 1) {
+          throw new Error(`Item "${item.name}" is no longer available in the requested quantity.`);
+        }
+        await tx.inventoryMovement.create({
+          data: {
+            productId: item.productId,
+            variantId: item.variantId,
+            quantity: -item.quantity,
+            reason: 'SALE',
+            reference: payment.order.orderNumber
+          }
         });
       }
 
-      return updatedOrder;
+      const orderUpdate = await tx.order.updateMany({
+        where: { id: orderId, status: 'PENDING' },
+        data: { status: 'CONFIRMED' }
+      });
+      if (orderUpdate.count !== 1) {
+        throw new Error('Order has already been processed.');
+      }
+
+      return payment.order;
     });
 
     return { success: true, orderNumber: order.orderNumber };
@@ -215,16 +269,26 @@ export class OrderService {
           { orderNumber: identifier }
         ]
       },
-      include: {
+      select: {
+        id: true,
+        orderNumber: true,
+        status: true,
+        subtotal: true,
+        shippingAmount: true,
+        discountAmount: true,
+        totalAmount: true,
+        createdAt: true,
         items: {
-          include: {
-            product: {
-              include: { images: { take: 1 } }
-            }
+          select: {
+            id: true,
+            name: true,
+            weight: true,
+            grindType: true,
+            unitPrice: true,
+            quantity: true,
+            totalPrice: true
           }
-        },
-        payments: true,
-        shipments: true
+        }
       }
     });
   }

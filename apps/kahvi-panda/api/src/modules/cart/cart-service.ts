@@ -60,26 +60,45 @@ export class CartService {
     });
 
     const variantMap = new Map(dbVariants.map(v => [v.id, v]));
+    const quantitiesByVariant = new Map<string, number>();
+    for (const item of items) {
+      quantitiesByVariant.set(
+        item.variantId,
+        (quantitiesByVariant.get(item.variantId) || 0) + item.quantity
+      );
+    }
+
+    for (const item of items) {
+      const variant = variantMap.get(item.variantId);
+      if (!variant || variant.productId !== item.productId) {
+        throw new Error('A selected coffee variant is no longer available. Please refresh your bag.');
+      }
+    }
 
     let subtotal = 0;
     const computedItems = items.map(item => {
       const dbVariant = variantMap.get(item.variantId);
-      const verifiedPrice = dbVariant ? dbVariant.price : item.price;
-      const verifiedName = dbVariant ? dbVariant.product.name : item.name;
-      const verifiedImage = (dbVariant?.product.images[0]?.url) || item.image;
-      const inStock = dbVariant ? (dbVariant.stockQuantity >= item.quantity && dbVariant.isAvailable) : true;
+      if (!dbVariant) {
+        throw new Error('A selected coffee variant is no longer available. Please refresh your bag.');
+      }
+
+      const verifiedPrice = dbVariant.price;
+      const verifiedName = dbVariant.product.name;
+      const verifiedImage = dbVariant.product.images[0]?.url || item.image;
+      const inStock = dbVariant.stockQuantity >= (quantitiesByVariant.get(item.variantId) || item.quantity)
+        && dbVariant.isAvailable;
 
       const itemSubtotal = verifiedPrice * item.quantity;
       subtotal += itemSubtotal;
 
       return {
-        productId: item.productId,
+        productId: dbVariant.productId,
         variantId: item.variantId,
         name: verifiedName,
-        slug: item.slug,
+        slug: dbVariant.product.slug,
         image: verifiedImage,
         price: verifiedPrice,
-        weight: dbVariant?.weight || item.weight,
+        weight: dbVariant.weight,
         grindType: item.grindType,
         quantity: item.quantity,
         subtotal: itemSubtotal,

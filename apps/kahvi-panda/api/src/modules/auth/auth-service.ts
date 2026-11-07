@@ -51,11 +51,13 @@ export class AuthService {
 
   static async login(email: string, password: string) {
     const user = await prisma.user.findUnique({ where: { email: email.toLowerCase() } });
+
     if (!user) {
       throw new Error('Invalid email or password.');
     }
 
     const isMatch = await bcrypt.compare(password, user.passwordHash);
+
     if (!isMatch) {
       throw new Error('Invalid email or password.');
     }

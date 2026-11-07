@@ -29,6 +29,10 @@ export class ProductService {
       page = 1,
       limit = 24
     } = filters;
+    const currentPage = Number.isFinite(page) ? Math.max(1, Math.floor(page)) : 1;
+    const pageSize = Number.isFinite(limit) ? Math.min(100, Math.max(1, Math.floor(limit))) : 24;
+    const validMinPrice = Number.isFinite(minPrice) ? minPrice : undefined;
+    const validMaxPrice = Number.isFinite(maxPrice) ? maxPrice : undefined;
 
     const where: any = {
       status: 'ACTIVE'
@@ -54,12 +58,25 @@ export class ProductService {
       where.bestseller = true;
     }
 
+    if (validMinPrice !== undefined || validMaxPrice !== undefined) {
+      where.variants = {
+        some: {
+          price: {
+            ...(validMinPrice !== undefined ? { gte: validMinPrice } : {}),
+            ...(validMaxPrice !== undefined ? { lte: validMaxPrice } : {})
+          }
+        }
+      };
+    }
+
     if (search) {
       where.OR = [
         { name: { contains: search } },
         { description: { contains: search } },
         { tastingNotes: { contains: search } },
-        { origin: { contains: search } }
+        { origin: { contains: search } },
+        { compatibleBrewingMethods: { contains: search } },
+        { variants: { some: { grindType: { contains: search } } } }
       ];
     }
 
@@ -67,7 +84,8 @@ export class ProductService {
     if (sort === 'newest') orderBy = { createdAt: 'desc' };
     if (sort === 'popular') orderBy = { bestseller: 'desc' };
 
-    const skip = (page - 1) * limit;
+    const skip = (currentPage - 1) * pageSize;
+    const sortByPrice = sort === 'price_asc' || sort === 'price_desc';
 
     const [products, total] = await Promise.all([
       prisma.product.findMany({
@@ -78,43 +96,32 @@ export class ProductService {
           variants: { orderBy: { price: 'asc' } }
         },
         orderBy,
-        skip,
-        take: limit
+        ...(sortByPrice ? {} : { skip, take: pageSize })
       }),
       prisma.product.count({ where })
     ]);
 
-    // Apply price filter on variants if requested
-    let filteredProducts = products;
-    if (minPrice !== undefined || maxPrice !== undefined) {
-      filteredProducts = products.filter(p => {
-        const lowestVariantPrice = p.variants[0]?.price ?? 0;
-        if (minPrice !== undefined && lowestVariantPrice < minPrice) return false;
-        if (maxPrice !== undefined && lowestVariantPrice > maxPrice) return false;
-        return true;
-      });
-    }
-
     if (sort === 'price_asc') {
-      filteredProducts.sort((a, b) => (a.variants[0]?.price ?? 0) - (b.variants[0]?.price ?? 0));
+      products.sort((a, b) => (a.variants[0]?.price ?? 0) - (b.variants[0]?.price ?? 0));
     } else if (sort === 'price_desc') {
-      filteredProducts.sort((a, b) => (b.variants[0]?.price ?? 0) - (a.variants[0]?.price ?? 0));
+      products.sort((a, b) => (b.variants[0]?.price ?? 0) - (a.variants[0]?.price ?? 0));
     }
+    const pagedProducts = sortByPrice ? products.slice(skip, skip + pageSize) : products;
 
     return {
-      products: filteredProducts,
+      products: pagedProducts,
       pagination: {
         total,
-        page,
-        limit,
-        totalPages: Math.ceil(total / limit)
+        page: currentPage,
+        limit: pageSize,
+        totalPages: Math.ceil(total / pageSize)
       }
     };
   }
 
   static async getProductBySlug(slug: string) {
     return prisma.product.findUnique({
-      where: { slug },
+      where: { slug, status: 'ACTIVE' },
       include: {
         category: true,
         images: { orderBy: { sortOrder: 'asc' } },
@@ -149,7 +156,9 @@ export class ProductService {
   }
 
   static async searchCatalog(query: string) {
-    const cleanQ = query.trim().toLowerCase();
+    const cleanQ = query.trim();
+    if (!cleanQ) return [];
+
     return prisma.product.findMany({
       where: {
         status: 'ACTIVE',
@@ -158,6 +167,8 @@ export class ProductService {
           { description: { contains: cleanQ } },
           { tastingNotes: { contains: cleanQ } },
           { origin: { contains: cleanQ } },
+          { compatibleBrewingMethods: { contains: cleanQ } },
+          { variants: { some: { grindType: { contains: cleanQ } } } },
           { coffeeType: { contains: cleanQ } },
           { roastLevel: { contains: cleanQ } }
         ]

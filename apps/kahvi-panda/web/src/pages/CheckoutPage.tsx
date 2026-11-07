@@ -1,12 +1,68 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useCart } from '../features/cart/CartContext';
 import { ApiClient } from '../services/api';
 import { formatINR, BRAND } from '@kahvi-panda/shared';
-import { ShieldCheck, ArrowRight, Lock, CheckCircle2, AlertCircle } from 'lucide-react';
+import { ShieldCheck, ArrowRight, Lock, AlertCircle } from 'lucide-react';
+
+interface RazorpayPaymentResponse {
+  razorpay_order_id: string;
+  razorpay_payment_id: string;
+  razorpay_signature: string;
+}
+
+interface RazorpayOptions {
+  key: string;
+  amount: number;
+  currency: string;
+  name: string;
+  description: string;
+  order_id: string;
+  prefill: { name: string; email: string; contact: string };
+  handler: (response: RazorpayPaymentResponse) => void;
+  modal: { ondismiss: () => void };
+}
+
+interface RazorpayInstance {
+  open: () => void;
+  on: (event: string, handler: (response: { error?: { description?: string } }) => void) => void;
+}
+
+declare global {
+  interface Window {
+    Razorpay?: new (options: RazorpayOptions) => RazorpayInstance;
+  }
+}
+
+let razorpayScriptPromise: Promise<void> | undefined;
+
+const loadRazorpay = () => {
+  if (window.Razorpay) return Promise.resolve();
+  if (!razorpayScriptPromise) {
+    razorpayScriptPromise = new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+      script.async = true;
+      script.onload = () => {
+        if (window.Razorpay) {
+          resolve();
+        } else {
+          razorpayScriptPromise = undefined;
+          reject(new Error('Payment form did not initialize. Please try again.'));
+        }
+      };
+      script.onerror = () => {
+        razorpayScriptPromise = undefined;
+        reject(new Error('Unable to load the payment form. Please try again.'));
+      };
+      document.head.appendChild(script);
+    });
+  }
+  return razorpayScriptPromise;
+};
 
 export const CheckoutPage: React.FC = () => {
-  const { items, subtotal, isFreeShipping, clearCart } = useCart();
+  const { items, couponCode, subtotal, isFreeShipping, clearCart } = useCart();
   const navigate = useNavigate();
 
   const [formData, setFormData] = useState({
@@ -21,9 +77,29 @@ export const CheckoutPage: React.FC = () => {
     country: 'India' as const
   });
 
-  const [paymentMode, setPaymentMode] = useState<'TEST_MODE' | 'RAZORPAY'>('TEST_MODE');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [calculation, setCalculation] = useState<any>(null);
+  const [pricingError, setPricingError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    setCalculation(null);
+    setPricingError(null);
+    ApiClient.calculateCart(items, couponCode || undefined)
+      .then((result) => {
+        if (!active) return;
+        setCalculation(result);
+      })
+      .catch((calculationError: Error) => {
+        if (!active) return;
+        setPricingError(calculationError.message || 'Unable to verify your bag prices.');
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [items, couponCode]);
 
   if (items.length === 0) {
     return (
@@ -40,8 +116,9 @@ export const CheckoutPage: React.FC = () => {
     );
   }
 
-  const shippingAmount = isFreeShipping ? 0 : BRAND.shippingFee;
-  const totalAmount = subtotal + shippingAmount;
+  const shippingAmount = calculation?.shippingAmount ?? (isFreeShipping ? 0 : BRAND.shippingFee);
+  const displayedSubtotal = calculation?.subtotal ?? subtotal;
+  const totalAmount = calculation?.totalAmount ?? subtotal + shippingAmount;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -57,15 +134,56 @@ export const CheckoutPage: React.FC = () => {
       const payload = {
         items,
         address: formData,
+        couponCode: couponCode || undefined,
         notes: 'Handle with care. Kahvi Panda fresh roast.'
       };
 
       const result = await ApiClient.createOrder(payload);
 
-      // Clear cart
-      clearCart();
+      if (result.paymentMode === 'RAZORPAY') {
+        if (!result.razorpay) {
+          throw new Error('Payment could not be initialized. Your order has not been charged.');
+        }
 
-      // Navigate to confirmation
+        await loadRazorpay();
+        await new Promise<void>((resolve, reject) => {
+          const checkout = new window.Razorpay!({
+            key: result.razorpay.keyId,
+            amount: result.razorpay.amount,
+            currency: result.razorpay.currency,
+            name: BRAND.name,
+            description: 'Freshly roasted coffee from Kahvi Panda',
+            order_id: result.razorpay.orderId,
+            prefill: {
+              name: formData.fullName,
+              email: formData.email,
+              contact: formData.phone
+            },
+            handler: async (response) => {
+              try {
+                await ApiClient.verifyPayment({
+                  orderId: result.orderId,
+                  razorpayOrderId: response.razorpay_order_id,
+                  razorpayPaymentId: response.razorpay_payment_id,
+                  razorpaySignature: response.razorpay_signature
+                });
+                resolve();
+              } catch (verificationError) {
+                reject(verificationError);
+              }
+            },
+            modal: {
+              ondismiss: () => reject(new Error('Payment was cancelled. Your bag is still saved.'))
+            }
+          });
+          checkout.on('payment.failed', (response) => {
+            reject(new Error(response.error?.description || 'Payment failed. Please try again.'));
+          });
+          checkout.open();
+        });
+      }
+
+      clearCart();
       navigate(`/order-confirmation/${result.orderNumber}`);
     } catch (err: any) {
       setError(err.message || 'Checkout failed. Please review your address details.');
@@ -79,7 +197,7 @@ export const CheckoutPage: React.FC = () => {
       <div className="border-b border-[#30231C]/10 pb-6 flex items-center justify-between">
         <div>
           <h1 className="font-serif text-3xl sm:text-5xl text-[#30231C]">Secure Checkout</h1>
-          <p className="text-xs text-[#4B3428]/80 mt-1">256-bit encrypted • Freshly dispatched from Kolkata</p>
+          <p className="text-xs text-[#4B3428]/80 mt-1">Payment handled securely • Freshly dispatched from Kolkata</p>
         </div>
         <div className="flex items-center gap-1.5 text-xs text-[#9CA88E] font-bold">
           <Lock className="w-4 h-4" />
@@ -91,6 +209,12 @@ export const CheckoutPage: React.FC = () => {
         <div className="p-4 rounded-2xl bg-red-50 border border-red-200 text-red-700 text-xs flex items-center gap-2">
           <AlertCircle className="w-4 h-4 shrink-0" />
           <span>{error}</span>
+        </div>
+      )}
+      {pricingError && (
+        <div className="p-4 rounded-2xl bg-red-50 border border-red-200 text-red-700 text-xs flex items-center gap-2" role="alert">
+          <AlertCircle className="w-4 h-4 shrink-0" />
+          <span>{pricingError}</span>
         </div>
       )}
 
@@ -211,55 +335,12 @@ export const CheckoutPage: React.FC = () => {
             </div>
           </div>
 
-          {/* Payment Method Selector */}
+          {/* Payment is selected by the store's configured payment gateway. */}
           <div className="pt-6 border-t border-[#30231C]/10 space-y-3">
-            <h3 className="font-serif text-xl text-[#30231C]">Select Payment Method</h3>
-            
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <label
-                className={`p-4 rounded-2xl border cursor-pointer flex flex-col justify-between transition-all ${
-                  paymentMode === 'TEST_MODE'
-                    ? 'border-[#30231C] bg-[#FAF7F2] shadow-sm'
-                    : 'border-[#30231C]/10 bg-white hover:border-[#30231C]/30'
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-[#30231C]">Instant Test Order</span>
-                  <input
-                    type="radio"
-                    name="payment"
-                    checked={paymentMode === 'TEST_MODE'}
-                    onChange={() => setPaymentMode('TEST_MODE')}
-                    className="accent-[#30231C]"
-                  />
-                </div>
-                <p className="text-[11px] text-[#4B3428]/70 mt-2">
-                  Simulated local order. Immediate confirmation with live inventory decrement.
-                </p>
-              </label>
-
-              <label
-                className={`p-4 rounded-2xl border cursor-pointer flex flex-col justify-between transition-all ${
-                  paymentMode === 'RAZORPAY'
-                    ? 'border-[#30231C] bg-[#FAF7F2] shadow-sm'
-                    : 'border-[#30231C]/10 bg-white hover:border-[#30231C]/30'
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-[#30231C]">Razorpay Gateway</span>
-                  <input
-                    type="radio"
-                    name="payment"
-                    checked={paymentMode === 'RAZORPAY'}
-                    onChange={() => setPaymentMode('RAZORPAY')}
-                    className="accent-[#30231C]"
-                  />
-                </div>
-                <p className="text-[11px] text-[#4B3428]/70 mt-2">
-                  UPI, Cards, NetBanking. (Active when business credentials configured).
-                </p>
-              </label>
-            </div>
+            <h3 className="font-serif text-xl text-[#30231C]">Secure Payment</h3>
+            <p className="text-xs text-[#4B3428]/80">
+              Payment is processed using the secure method configured for this store.
+            </p>
           </div>
         </div>
 
@@ -293,12 +374,18 @@ export const CheckoutPage: React.FC = () => {
           <div className="space-y-2 text-xs border-t border-[#30231C]/10 pt-4">
             <div className="flex justify-between text-[#4B3428]">
               <span>Subtotal</span>
-              <span className="font-semibold text-[#30231C]">{formatINR(subtotal)}</span>
+              <span className="font-semibold text-[#30231C]">{formatINR(displayedSubtotal)}</span>
             </div>
             <div className="flex justify-between text-[#4B3428]">
               <span>Delivery Charges</span>
-              <span>{isFreeShipping ? 'FREE' : formatINR(BRAND.shippingFee)}</span>
+              <span>{shippingAmount === 0 ? 'FREE' : formatINR(shippingAmount)}</span>
             </div>
+            {calculation?.discountAmount > 0 && (
+              <div className="flex justify-between text-[#9CA88E] font-semibold">
+                <span>Coupon {calculation.couponApplied?.code}</span>
+                <span>-{formatINR(calculation.discountAmount)}</span>
+              </div>
+            )}
             <div className="flex justify-between items-baseline pt-3 border-t border-[#30231C]/10 text-base">
               <span className="font-serif text-xl text-[#30231C]">Total Amount</span>
               <span className="font-serif text-2xl font-bold text-[#30231C]">
@@ -309,10 +396,10 @@ export const CheckoutPage: React.FC = () => {
 
           <button
             type="submit"
-            disabled={isSubmitting}
+            disabled={isSubmitting || !calculation || Boolean(pricingError)}
             className="w-full py-4 rounded-pill bg-[#30231C] text-[#F8F5EE] text-xs font-bold tracking-widest uppercase hover:bg-[#4B3428] shadow-elevated transition-all flex items-center justify-center gap-2 disabled:opacity-60"
           >
-            <span>{isSubmitting ? 'Placing Order...' : `Place Order • ${formatINR(totalAmount)}`}</span>
+            <span>{isSubmitting ? 'Processing...' : `Continue • ${formatINR(totalAmount)}`}</span>
             <ArrowRight className="w-4 h-4" />
           </button>
 

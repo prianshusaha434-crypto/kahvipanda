@@ -95,7 +95,7 @@ kahvi-panda/
 
 ### Staff Admin Dashboard
 - `/admin` — Control Center (Revenue, Orders, Enquiries, Panda AI Analytics, Status Management)
-- **Default Credentials**: `admin@kahvipanda.in` / `admin123`
+- Admin accounts are created only when `ADMIN_EMAIL` and `ADMIN_PASSWORD` are explicitly set before seeding. No default administrator password is shipped.
 
 ---
 
@@ -120,25 +120,25 @@ cp .env.example .env
 ```bash
 npx prisma generate
 npx prisma db push
+$env:SEED_RESET="true"
 npx tsx prisma/seed.ts
 ```
+For PowerShell, set `ADMIN_EMAIL` and `ADMIN_PASSWORD` before seeding if you need an admin account. The seed clears store data, so only run it against a new database or when deliberately resetting one.
 
-### Step 4: Run Tests
-```bash
-npx tsx tests/api.test.ts
-```
-
-### Step 5: Start Development Servers
+### Step 4: Start Development Servers
 Run backend API and frontend concurrently:
 ```bash
-# Terminal 1 (Backend API on port 5000):
-npm run dev --workspace=@kahvi-panda/api
-
-# Terminal 2 (Frontend on port 5173):
-npm run dev --workspace=@kahvi-panda/web
+# API and storefront together:
+npm run dev
 ```
 
 Open [http://localhost:5173](http://localhost:5173) in your browser.
+
+### Step 5: Run Integration Tests
+With the API running on port 5000 and the database seeded, run:
+```bash
+npm test
+```
 
 ---
 
@@ -154,15 +154,17 @@ Open [http://localhost:5173](http://localhost:5173) in your browser.
 
 ## 7. Production Deployment Instructions
 
-1. **Database**: Switch `datasource db { provider = "postgresql" }` in `prisma/schema.prisma` and provide any PostgreSQL connection string (Supabase, Neon, AWS RDS) via `DATABASE_URL`.
-2. **Build Web**:
+The repository is configured for SQLite. For a single-server deployment, attach a persistent disk and point `DATABASE_URL` to a database file on that disk. Do not use the ephemeral application filesystem for the live database. For PostgreSQL, first migrate the Prisma schema and regenerate the client; changing only `DATABASE_URL` is not sufficient.
+
+1. **Set environment variables**: Set `NODE_ENV=production`, `PORT` to the port supplied by the host, a strong random `JWT_SECRET` of at least 32 characters, and `DATABASE_URL` to the persistent database file. Set `RAZORPAY_KEY_ID` and `RAZORPAY_KEY_SECRET` to enable live payments. Never set `SEED_RESET=true` on a live database.
+2. **Build**:
    ```bash
-   npm run build --workspace=@kahvi-panda/web
+   npm ci
+   npm run build
+   npm run db:push
    ```
-3. **Build API**:
+3. **Start**:
    ```bash
-   npm run build --workspace=@kahvi-panda/api
+   npm start
    ```
-4. **Deploy**:
-   - `apps/web`: Deploy `dist/` to Vercel, Netlify, or Cloudflare Pages.
-   - `apps/api`: Deploy container or Node server to Render, Railway, AWS ECS, or Google Cloud Run.
+   The root server serves both the API and the built storefront from the same origin; configure the host to run the build command above and use `npm start` as its start command.

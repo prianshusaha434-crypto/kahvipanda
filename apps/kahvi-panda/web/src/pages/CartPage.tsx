@@ -1,12 +1,15 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useCart } from '../features/cart/CartContext';
+import { ApiClient } from '../services/api';
 import { formatINR, BRAND } from '@kahvi-panda/shared';
-import { Trash2, ArrowRight, ShieldCheck, ShoppingBag, Tag, Check } from 'lucide-react';
+import { Trash2, ArrowRight, ShieldCheck, Check } from 'lucide-react';
 
 export const CartPage: React.FC = () => {
   const {
     items,
+    couponCode,
+    setCouponCode,
     removeItem,
     updateQuantity,
     subtotal,
@@ -15,32 +18,58 @@ export const CartPage: React.FC = () => {
   } = useCart();
 
   const navigate = useNavigate();
-  const [couponCode, setCouponCode] = useState('');
-  const [appliedCoupon, setAppliedCoupon] = useState<string | null>(null);
+  const [couponInput, setCouponInput] = useState(couponCode);
   const [couponError, setCouponError] = useState<string | null>(null);
+  const [calculation, setCalculation] = useState<any>(null);
+  const [pricingError, setPricingError] = useState<string | null>(null);
 
-  const handleApplyCoupon = (e: React.FormEvent) => {
+  useEffect(() => {
+    setCouponInput(couponCode);
+  }, [couponCode]);
+
+  useEffect(() => {
+    let active = true;
+    setPricingError(null);
+    ApiClient.calculateCart(items, couponCode || undefined)
+      .then((result) => {
+        if (!active) return;
+        setCalculation(result);
+        if (couponCode && !result.couponApplied) {
+          setCouponCode('');
+          setCouponError('Coupon no longer applies to this bag.');
+        }
+      })
+      .catch((error: Error) => {
+        if (!active) return;
+        setPricingError(error.message || 'Unable to verify your bag prices.');
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [items, couponCode, setCouponCode]);
+
+  const handleApplyCoupon = async (e: React.FormEvent) => {
     e.preventDefault();
-    const code = couponCode.trim().toUpperCase();
-    if (code === 'RUSH10') {
-      setAppliedCoupon('RUSH10');
-      setCouponError(null);
-    } else if (code === 'FIRSTSIP') {
-      setAppliedCoupon('FIRSTSIP');
-      setCouponError(null);
-    } else {
-      setCouponError('Invalid coupon code. Try RUSH10 or FIRSTSIP.');
+    setCouponError(null);
+    try {
+      const code = couponInput.trim().toUpperCase();
+      const result = await ApiClient.calculateCart(items, code);
+      if (!result.couponApplied) {
+        setCouponError('This coupon is invalid or your bag does not meet its minimum order value.');
+        return;
+      }
+      setCouponCode(result.couponApplied.code);
+      setCalculation(result);
+    } catch (error) {
+      setCouponError(error instanceof Error ? error.message : 'Unable to verify this coupon.');
     }
   };
 
-  const discountAmount = appliedCoupon === 'RUSH10'
-    ? Math.round(subtotal * 0.1)
-    : appliedCoupon === 'FIRSTSIP'
-    ? 50
-    : 0;
-
-  const shippingAmount = isFreeShipping || subtotal === 0 ? 0 : BRAND.shippingFee;
-  const totalAmount = Math.max(0, subtotal + shippingAmount - discountAmount);
+  const displayedSubtotal = calculation?.subtotal ?? subtotal;
+  const discountAmount = calculation?.discountAmount ?? 0;
+  const shippingAmount = calculation?.shippingAmount ?? (isFreeShipping ? 0 : BRAND.shippingFee);
+  const totalAmount = calculation?.totalAmount ?? subtotal + shippingAmount;
 
   if (items.length === 0) {
     return (
@@ -153,8 +182,8 @@ export const CartPage: React.FC = () => {
               <form onSubmit={handleApplyCoupon} className="flex gap-2">
                 <input
                   type="text"
-                  value={couponCode}
-                  onChange={(e) => setCouponCode(e.target.value)}
+                  value={couponInput}
+                  onChange={(e) => setCouponInput(e.target.value)}
                   placeholder="Coupon code (e.g. RUSH10)"
                   className="flex-1 px-3.5 py-2.5 rounded-full text-xs uppercase bg-white border border-[#30231C]/20 focus:outline-none"
                 />
@@ -165,10 +194,10 @@ export const CartPage: React.FC = () => {
                   Apply
                 </button>
               </form>
-              {appliedCoupon && (
+              {couponCode && (
                 <p className="text-[11px] text-[#9CA88E] font-bold mt-1.5 flex items-center gap-1">
                   <Check className="w-3 h-3" />
-                  <span>Coupon {appliedCoupon} applied successfully!</span>
+                  <span>Coupon {couponCode} applied successfully!</span>
                 </p>
               )}
               {couponError && (
@@ -179,7 +208,7 @@ export const CartPage: React.FC = () => {
             <div className="space-y-2 text-xs border-t border-[#30231C]/10 pt-4">
               <div className="flex justify-between text-[#4B3428]">
                 <span>Bag Subtotal</span>
-                <span className="font-semibold text-[#30231C]">{formatINR(subtotal)}</span>
+                <span className="font-semibold text-[#30231C]">{formatINR(displayedSubtotal)}</span>
               </div>
               {discountAmount > 0 && (
                 <div className="flex justify-between text-[#9CA88E] font-semibold">
@@ -189,7 +218,7 @@ export const CartPage: React.FC = () => {
               )}
               <div className="flex justify-between text-[#4B3428]">
                 <span>Delivery (India)</span>
-                <span>{isFreeShipping ? 'FREE' : formatINR(BRAND.shippingFee)}</span>
+                <span>{shippingAmount === 0 ? 'FREE' : formatINR(shippingAmount)}</span>
               </div>
               <div className="flex justify-between items-baseline pt-3 border-t border-[#30231C]/10 text-base">
                 <span className="font-serif text-xl text-[#30231C]">Total</span>
@@ -199,9 +228,14 @@ export const CartPage: React.FC = () => {
               </div>
             </div>
 
+            {pricingError && (
+              <p className="text-[11px] text-[#BC785C] font-semibold" role="alert">{pricingError}</p>
+            )}
+
             <button
               onClick={() => navigate('/checkout')}
-              className="w-full py-4 rounded-pill bg-[#30231C] text-[#F8F5EE] text-xs font-bold tracking-widest uppercase hover:bg-[#4B3428] shadow-elevated transition-all flex items-center justify-center gap-2"
+              disabled={!calculation || Boolean(pricingError)}
+              className="w-full py-4 rounded-pill bg-[#30231C] text-[#F8F5EE] text-xs font-bold tracking-widest uppercase hover:bg-[#4B3428] shadow-elevated transition-all flex items-center justify-center gap-2 disabled:opacity-50"
             >
               <span>Proceed to Checkout</span>
               <ArrowRight className="w-4 h-4" />

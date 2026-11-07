@@ -29,11 +29,31 @@ async function runTestSuite() {
   assert.strictEqual(searchRes.status, 200);
   const searchData = await searchRes.json();
   assert.ok(Array.isArray(searchData), 'Search should return an array');
+  assert.ok(searchData.length > 0, 'Search should match products by supported brewing method or grind');
   console.log(`✅ Search passed. Returned ${searchData.length} matches for query "Moka".`);
 
   // 4. Server-Side Cart Pricing & Free Shipping Threshold Calculation
   console.log('\nTest 4: Server-Side Cart Pricing & Free Shipping Threshold');
   const variant = firstProd.variants[0];
+  const invalidCartRes = await fetch(`${baseUrl}/cart/calculate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      items: [{
+        productId: 'not-the-variant-product',
+        variantId: variant.id,
+        name: firstProd.name,
+        slug: firstProd.slug,
+        image: '',
+        price: 1,
+        weight: variant.weight,
+        grindType: variant.grindType,
+        quantity: 1
+      }]
+    })
+  });
+  assert.strictEqual(invalidCartRes.status, 400, 'Cart must reject a variant attached to a different product');
+
   const cartRes = await fetch(`${baseUrl}/cart/calculate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -45,7 +65,7 @@ async function runTestSuite() {
           name: firstProd.name,
           slug: firstProd.slug,
           image: firstProd.images?.[0]?.url || '',
-          price: variant.price,
+          price: 1,
           weight: variant.weight,
           grindType: variant.grindType,
           quantity: 1
@@ -57,6 +77,7 @@ async function runTestSuite() {
   assert.strictEqual(cartRes.status, 200);
   const cartData = await cartRes.json();
   assert.ok(cartData.subtotal > 0, 'Subtotal should be greater than 0');
+  assert.strictEqual(cartData.items[0].price, variant.price, 'Server must ignore client-supplied prices');
   assert.strictEqual(cartData.shippingAmount, 99, 'Orders under ₹999 must have ₹99 delivery fee');
   assert.ok(cartData.discountAmount > 0, 'Coupon RUSH10 should apply discount');
   console.log(`✅ Cart calculation passed. Subtotal: ₹${cartData.subtotal}, Shipping: ₹${cartData.shippingAmount}, Discount: ₹${cartData.discountAmount}, Total: ₹${cartData.totalAmount}`);
@@ -116,6 +137,11 @@ async function runTestSuite() {
   assert.strictEqual(checkoutRes.status, 201);
   const orderData = await checkoutRes.json();
   assert.ok(orderData.orderNumber.startsWith('KP-'), 'Order number must be generated');
+  const publicOrderRes = await fetch(`${baseUrl}/orders/${orderData.orderNumber}`);
+  assert.strictEqual(publicOrderRes.status, 200);
+  const publicOrder = await publicOrderRes.json();
+  assert.ok(!('customerEmail' in publicOrder) && !('customerPhone' in publicOrder), 'Public order tracking must not expose customer contact details');
+  assert.ok(!('shippingAddress' in publicOrder) && !('payments' in publicOrder), 'Public order tracking must not expose addresses or payment records');
   console.log(`✅ Checkout passed. Placed Order #${orderData.orderNumber} for ₹${orderData.totalAmount}`);
 
   // 7. Panda AI Concierge Multilingual & Tool Test

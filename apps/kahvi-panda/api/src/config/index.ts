@@ -2,15 +2,22 @@ import dotenv from 'dotenv';
 import path from 'path';
 
 // Load .env from root or current folder
-dotenv.config({ path: path.resolve(__dirname, '../../../../.env') });
+dotenv.config({ path: path.resolve(__dirname, '../../../../../.env') });
 dotenv.config(); // fallback
+
+const nodeEnv = process.env.NODE_ENV || 'development';
+const jwtSecret = process.env.JWT_SECRET || (nodeEnv === 'production' ? '' : 'local-development-only-kahvi-panda-secret');
+
+if (nodeEnv === 'production' && jwtSecret.length < 32) {
+  throw new Error('JWT_SECRET must be set to at least 32 characters in production.');
+}
 
 export const CONFIG = {
   PORT: parseInt(process.env.PORT || '5000', 10),
-  NODE_ENV: process.env.NODE_ENV || 'development',
+  NODE_ENV: nodeEnv,
   API_PREFIX: process.env.API_PREFIX || '/api/v1',
-  CORS_ORIGIN: process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',') : ['http://localhost:5173', 'http://localhost:3000'],
-  JWT_SECRET: process.env.JWT_SECRET || 'kahvi_panda_jwt_secret_kolkata_2026',
+  CORS_ORIGIN: process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',').map(origin => origin.trim()).filter(Boolean) : ['http://localhost:5173', 'http://localhost:3000'],
+  JWT_SECRET: jwtSecret,
   SESSION_SECRET: process.env.SESSION_SECRET || 'kahvi_panda_session_secret_2026',
   OPENAI_API_KEY: process.env.OPENAI_API_KEY || '',
   OPENAI_MODEL: process.env.OPENAI_MODEL || 'gpt-4o',

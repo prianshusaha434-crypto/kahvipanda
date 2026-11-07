@@ -1,8 +1,16 @@
+import bcrypt from 'bcryptjs';
 import { PrismaClient } from '@prisma/client';
+import dotenv from 'dotenv';
+import path from 'path';
 
+dotenv.config({ path: path.resolve(__dirname, '../.env') });
 const prisma = new PrismaClient();
 
 async function main() {
+  if (process.env.SEED_RESET !== 'true') {
+    throw new Error('Seeding clears existing store data. Set SEED_RESET=true only when intentionally initializing or resetting a database.');
+  }
+
   console.log('🌱 Starting Kahvi Panda database seed...');
 
   // 1. Clear existing data
@@ -27,17 +35,26 @@ async function main() {
   await prisma.coupon.deleteMany({});
   await prisma.blogPost.deleteMany({});
 
-  // 2. Seed Default Admin User
-  const admin = await prisma.user.create({
-    data: {
-      email: 'admin@kahvipanda.in',
-      name: 'Panda Commander (Admin)',
-      passwordHash: '$2a$10$wJt0F8YI.r9dM9qEre7.d.w/9M7YQGjLkmH4v3XbBvT.Q9p1Z6sS6', // hashed 'admin123'
-      role: 'ADMIN',
-      phone: '+91 9874199454',
-    },
-  });
-  console.log('✅ Admin user created: admin@kahvipanda.in / admin123');
+  // 2. Seed an admin only when explicit credentials are provided.
+  const adminEmail = process.env.ADMIN_EMAIL?.trim().toLowerCase();
+  const adminPassword = process.env.ADMIN_PASSWORD;
+  if (Boolean(adminEmail) !== Boolean(adminPassword)) {
+    throw new Error('Set both ADMIN_EMAIL and ADMIN_PASSWORD to seed an admin account.');
+  }
+  if (adminEmail && adminPassword) {
+    const adminPasswordHash = await bcrypt.hash(adminPassword, 12);
+    await prisma.user.create({
+      data: {
+        email: adminEmail,
+        name: process.env.ADMIN_NAME?.trim() || 'Kahvi Panda Admin',
+        passwordHash: adminPasswordHash,
+        role: 'ADMIN',
+      },
+    });
+    console.log(`✅ Admin user created: ${adminEmail}`);
+  } else {
+    console.log('ℹ️ No admin account created; set ADMIN_EMAIL and ADMIN_PASSWORD to add one.');
+  }
 
   // 3. Seed Categories
   const catWholeBeans = await prisma.category.create({

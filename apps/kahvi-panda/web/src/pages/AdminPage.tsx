@@ -15,8 +15,8 @@ import {
 
 export const AdminPage: React.FC = () => {
   const [token, setToken] = useState<string | null>(() => localStorage.getItem('kahvi_auth_token'));
-  const [email, setEmail] = useState('admin@kahvipanda.in');
-  const [password, setPassword] = useState('admin123');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [loginError, setLoginError] = useState<string | null>(null);
 
   const [activeTab, setActiveTab] = useState<'overview' | 'orders' | 'enquiries' | 'ai'>('overview');
@@ -129,7 +129,7 @@ export const AdminPage: React.FC = () => {
           </form>
 
           <p className="text-[11px] text-[#4B3428]/60 text-center mt-4">
-            Default Seed Credentials: <strong>admin@kahvipanda.in</strong> / <strong>admin123</strong>
+            Sign in with the administrator credentials configured for this store.
           </p>
         </div>
       </div>
