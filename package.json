@@ -3,6 +3,10 @@
   "version": "1.0.0",
   "private": true,
   "description": "KAHVI PANDA — The Nordic Blend. Full-stack e-commerce platform.",
+  "engines": {
+    "node": ">=20.0.0",
+    "npm": ">=10.0.0"
+  },
   "workspaces": [
     "apps/kahvi-panda/*"
   ],

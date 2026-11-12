@@ -102,7 +102,7 @@ kahvi-panda/
 ## 5. Getting Started (Local Development)
 
 ### Prerequisites
-- Node.js >= 18.0.0 (Node 24 recommended)
+- Node.js >= 20.0.0 (Node 24 recommended)
 - npm >= 10.0.0
 
 ### Step 1: Install Dependencies
